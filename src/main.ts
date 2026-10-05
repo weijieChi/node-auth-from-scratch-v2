@@ -1,4 +1,12 @@
 import { env } from './config/env.js';
+import { logger } from './observability/logger.js';
 
-console.log('Node Auth From Scratch v2');
-console.log(`Environment: ${env.NODE_ENV}, server: ${env.HOST}:${env.PORT}`);
+logger.info('Node Auth From Scratch v2');
+
+logger.info('Application configuration loaded', {
+  environment: env.NODE_ENV,
+  host: env.HOST,
+  port: env.PORT,
+});
+
+logger.debug('Debug logging is enabled');
