@@ -17,7 +17,7 @@ export default defineConfig(
   },
 
   {
-    files: ['src/**/*.ts'],
+    files: ['src/**/*.ts', 'tests/**/*.ts'], // 測試也是正式程式碼的一部分
 
     extends: [
       js.configs.recommended,
