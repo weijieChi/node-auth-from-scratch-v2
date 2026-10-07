@@ -1,40 +1,33 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 
+import { EmailAlreadyInUseError } from '../../../application/errors/email-already-in-use-error.js';
 import { logger } from '../../../observability/logger.js';
 
 /**
- * 404 Handler
- *
- * 能走到這裡代表：
- *
- * 前面的所有 Route 都沒有處理這個 Request。
- *
- * 404 本身不是 Application Crash，
- * 因此不需要 throw Error。
+ * 沒有任何 Route 匹配時，
+ * 回傳統一 JSON 404 Response。
  */
 export const notFoundHandler: RequestHandler = (req, res) => {
   res.status(404).json({
     error: {
-      code: 'NOT_FOUND',
+      code: 'ROUTE_NOT_FOUND',
       message: 'Route not found',
-      path: req.originalUrl,
     },
   });
 };
 
 /**
- * Global Express Error Handler
+ * Express Global Error Handler。
  *
- * Express Error Middleware 必須有四個參數：
+ * Express 5 可以把 async route/controller
+ * rejected Promise 自動傳到這裡。
  *
- *   error
- *   req
- *   res
- *   next
+ * 因此一般 Controller 不需要大量：
  *
- * 即使目前沒有直接使用 next，
- * Express 仍然靠這個函式 signature 判斷
- * 它是一個 Error Middleware。
+ * try {
+ * } catch {
+ *   next(error);
+ * }
  */
 export function errorHandler(
   error: unknown,
@@ -43,27 +36,40 @@ export function errorHandler(
   next: NextFunction,
 ): void {
   /**
-   * 如果 Response Header 已經送出去，
-   * 我們不能重新產生另一份 JSON Response。
-   *
-   * 例如未來處理 Stream 時：
-   *
-   * Response 已開始傳送
-   * → 中途發生 Error
-   *
-   * 這種情況交回 Express default error handler
-   * 處理 connection。
+   * Response Header 已經送出時，
+   * 交回 Express 預設 Error Handler。
    */
   if (res.headersSent) {
     next(error);
+
     return;
   }
 
   /**
-   * Unknown Error 統一記錄詳細資訊。
+   * Application Error
+   *       ↓
+   * HTTP Error
    *
-   * Error object 的 name/message/stack 明確展開，
-   * 避免 JSON serialization 遺失 Error properties。
+   * Email 重複屬於正常 Business Conflict，
+   * 不是 Server Failure，
+   * 因此不記成 logger.error。
+   */
+  if (error instanceof EmailAlreadyInUseError) {
+    res.status(409).json({
+      error: {
+        code: 'EMAIL_ALREADY_IN_USE',
+        message: 'Email address is already in use',
+      },
+    });
+
+    return;
+  }
+
+  /**
+   * 其餘未知錯誤才當成 Server Error。
+   *
+   * Stack Trace 只寫 Log，
+   * 不回傳給 Client。
    */
   if (error instanceof Error) {
     logger.error('Unhandled HTTP error', {
@@ -83,22 +89,6 @@ export function errorHandler(
     });
   }
 
-  /**
-   * 不把 Error stack/message 直接回傳 Client。
-   *
-   * Server 保存詳細 Log，
-   * Client 只取得安全、穩定的 Error Contract。
-   *
-   * 之後 Application Error 建立後，
-   * 這裡才會逐步加入：
-   *
-   * Validation → 400
-   * Unauthorized → 401
-   * Not Found → 404
-   * Conflict → 409
-   *
-   * 現階段所有未知 Error 統一為 500。
-   */
   res.status(500).json({
     error: {
       code: 'INTERNAL_SERVER_ERROR',

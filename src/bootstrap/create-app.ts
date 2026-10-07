@@ -1,56 +1,51 @@
-import express from 'express';
+import express, { type Express, type Router } from 'express';
 
 import { httpLogger } from '../observability/http-logger.js';
 import { errorHandler, notFoundHandler } from '../presentation/http/middleware/error-handler.js';
 import { healthRouter } from '../presentation/http/routes/health.routes.js';
 
 /**
- * 建立 Express Application。
+ * createApp() 可以接受已經由 Composition Root
+ * 建立完成的 Router。
  *
- * 這個函式只負責組裝 HTTP Application：
+ * authRouter 設成 optional，
+ * 主要是讓既有 Health Test：
  *
- * Middleware
- * Routes
- * 404 Handler
- * Global Error Handler
+ *   createApp()
  *
- * 這裡刻意不呼叫 app.listen()。
- *
- * 好處：
- *
- * Production:
- *   main.ts → createApp() → listen()
- *
- * Step 06 HTTP Test:
- *   Supertest → createApp()
- *
- * 測試不需要真的占用固定 TCP Port。
+ * 仍然可以單獨建立最小 Express Application，
+ * 不需要為了測 /health 額外連結整套 Auth dependencies。
  */
-export function createApp() {
+interface CreateAppOptions {
+  authRouter?: Router;
+}
+
+export function createApp(options: CreateAppOptions = {}): Express {
   const app = express();
 
   /**
-   * Express 預設會回傳：
-   *
-   * X-Powered-By: Express
-   *
-   * Application 沒有必要主動暴露框架資訊。
+   * 不暴露 Express framework 資訊。
    */
   app.disable('x-powered-by');
 
   /**
-   * HTTP Access Log
-   *
-   * Morgan 產生 HTTP access log，
-   * 再送進 Winston。
+   * HTTP access log。
    */
   app.use(httpLogger);
 
   /**
-   * JSON Request Body Parser
+   * JSON Request Body Parser。
    *
-   * Express 5 已內建 JSON parser，
-   * 不需要另外安裝 body-parser。
+   * POST /auth/register
+   *
+   * 的：
+   *
+   * {
+   *   "email": "...",
+   *   "password": "..."
+   * }
+   *
+   * 會在這裡被解析成 req.body。
    */
   app.use(
     express.json({
@@ -59,14 +54,25 @@ export function createApp() {
   );
 
   /**
-   * Routes
+   * Health Check。
    */
   app.use('/health', healthRouter);
 
   /**
-   * 找不到 Route。
+   * Authentication Routes。
    *
-   * 必須放在所有正常 Route 後面。
+   * Production Application 會從 container 傳進來。
+   *
+   * Health-only Test 可以不提供。
+   */
+  if (options.authRouter) {
+    app.use('/auth', options.authRouter);
+  }
+
+  /**
+   * Routes 都沒有匹配到才進 404。
+   *
+   * Error Handler 一定要放在所有 Routes 後面。
    */
   app.use(notFoundHandler);
 

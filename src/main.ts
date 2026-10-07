@@ -2,8 +2,13 @@ import { createApp } from './bootstrap/create-app.js';
 import { shutdown } from './bootstrap/shutdown.js';
 import { env } from './config/env.js';
 import { logger } from './observability/logger.js';
+import { createContainer } from './bootstrap/container.js';
 
-const app = createApp();
+const container = createContainer();
+
+const app = createApp({
+  authRouter: container.authRouter,
+});
 
 const server = app.listen(env.PORT, env.HOST, () => {
   logger.info('HTTP server started', {
