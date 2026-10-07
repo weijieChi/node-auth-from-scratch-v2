@@ -1,4 +1,12 @@
+import 'dotenv/config';
+
 import { defineConfig } from 'vitest/config';
+
+const databaseUrl = process.env['DATABASE_URL'];
+
+if (!databaseUrl) {
+  throw new Error('DATABASE_URL is required to run tests');
+}
 
 export default defineConfig({
   test: {
@@ -33,7 +41,7 @@ export default defineConfig({
      */
     env: {
       NODE_ENV: 'test',
-      DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/auth_test',
+      DATABASE_URL: databaseUrl,
 
       /**
        * 測試時不要讓每個 HTTP Request
@@ -61,6 +69,10 @@ export default defineConfig({
        * 不統計 tests 本身。
        */
       include: ['src/**/*.ts'],
+
+      exclude: [
+        'src/generated/**',
+      ],
     },
   },
 });
