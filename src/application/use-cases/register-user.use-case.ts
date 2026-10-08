@@ -1,18 +1,20 @@
-import type { User } from '../../domain/entities/user.js';
 import { Email } from '../../domain/value-objects/email.js';
+import type { User } from '../../domain/entities/user.js';
 
-import { EmailAlreadyInUseError } from '../errors/email-already-in-use-error.js';
+import { AppError } from '../errors/app-error.js';
 import type { UserRepository } from '../ports/repositories/user.repository.js';
 import type { PasswordHasher } from '../ports/services/password-hasher.js';
 
 /**
  * Register Use Case 的輸入資料。
  *
- * 這裡仍然接收 primitive string，
- * Email 的標準化與合法性會交給 Email Value Object 處理。
+ * 仍然接收 primitive string。
  *
- * HTTP 層之後還會使用 Zod 做 Request Schema 驗證，
- * 但 Use Case 本身不依賴 Express 或 HTTP。
+ * Email 的 normalization / validation
+ * 交給 Email Value Object。
+ *
+ * Password business rule
+ * 則由這個 Use Case 負責。
  */
 interface RegisterUserInput {
   email: string;
@@ -20,23 +22,30 @@ interface RegisterUserInput {
 }
 
 /**
- * 使用者註冊 Use Case。
+ * Local password 最低長度。
  *
- * 主要負責：
+ * 這是 Register Application rule，
+ * 因此集中在 RegisterUserUseCase。
+ */
+const MIN_PASSWORD_LENGTH = 8;
+
+/**
+ * 註冊本機帳號。
  *
- * 1. 建立並驗證 Email。
- * 2. 檢查 Email 是否已經被使用。
- * 3. 將原始密碼交給 PasswordHasher。
- * 4. 將 User 寫入 Repository。
+ * Use Case 負責 Application business flow：
  *
- * Use Case 不知道實際使用：
+ * 1. 建立並正規化 Email
+ * 2. 檢查最低密碼長度
+ * 3. 確認 Email 尚未使用
+ * 4. Hash password
+ * 5. 建立 User
  *
+ * Use Case 不直接知道：
+ *
+ * - Express
  * - Prisma
  * - PostgreSQL
  * - bcryptjs
- * - Express
- *
- * 這些細節全部由注入的 Port 實作處理。
  */
 export class RegisterUserUseCase {
   /**
@@ -82,6 +91,7 @@ export class RegisterUserUseCase {
    */
   async execute(input: RegisterUserInput): Promise<User> {
     /**
+     * Email Value Object 負責：
      * 將原始 Email string 轉成 Email Value Object。
      *
      * Email.create() 會：
@@ -95,62 +105,48 @@ export class RegisterUserUseCase {
     const email = Email.create(input.email);
 
     /**
-     * 基本密碼規則。
+     * Presentation Layer 已經會先用 Zod 驗證 HTTP Request。
      *
-     * Step 09 HTTP Zod Schema 也會提供 Request Boundary 驗證，
-     * 但 Use Case 不應完全假設它永遠只會由 HTTP 呼叫。
-     *
-     * bcrypt 的 72 bytes 上限則由 BcryptPasswordHasher
-     * 額外負責，因為那是 bcrypt implementation constraint。
+     * 但 Use Case 本身仍保留最低密碼長度規則，
+     * 因為 Application 不應假設永遠只會被 HTTP Controller 呼叫。
      */
-    if (input.password.length < 12) {
-      throw new RangeError('Password must contain at least 12 characters');
+    if (input.password.length < MIN_PASSWORD_LENGTH) {
+      throw new AppError(`Password must contain at least ${MIN_PASSWORD_LENGTH} characters`, 400);
     }
 
     /**
-     * 先檢查 Email 是否已存在。
-     *
-     * 這可以提供正常情況下比較明確的錯誤流程，
-     * 但不能取代 PostgreSQL UNIQUE constraint。
-     *
-     * Concurrent Register 時仍可能發生：
-     *
-     * A → findByEmail() → null
-     * B → findByEmail() → null
-     * A → INSERT success
-     * B → INSERT unique violation
-     *
-     * 因此 Prisma Repository 還會處理 P2002。
+     * 一般 duplicate registration 可以在 Hash password 前
+     * 就先拒絕，避免不必要的 bcrypt 計算。
      */
     const existingUser = await this.userRepository.findByEmail(email);
 
     if (existingUser) {
-      throw new EmailAlreadyInUseError();
+      throw new AppError('Email address is already in use', 409, 'EMAIL_ALREADY_IN_USE');
     }
 
-    /**
-     * Use Case 不知道實際使用 bcrypt。
-     *
-     * 它只要求：
-     *
-     *   raw password
-     *       ↓
-     *   PasswordHasher
-     *       ↓
-     *   password hash
-     */
     const passwordHash = await this.passwordHasher.hash(input.password);
 
     /**
-     * 將已正規化的 Email 和 password hash
-     * 交給 Repository 儲存。
+     * Repository.create()：
      *
-     * Repository 實際怎麼寫 PostgreSQL，
-     * Use Case 不需要知道。
+     * User
+     * → 建立成功
+     *
+     * null
+     * → Database unique constraint 發生 conflict
+     *
+     * 即使 findByEmail() 剛才沒有找到 User，
+     * concurrent request 仍可能在這之間先完成 INSERT。
      */
-    return this.userRepository.create({
+    const user = await this.userRepository.create({
       email,
       passwordHash,
     });
+
+    if (!user) {
+      throw new AppError('Email address is already in use', 409, 'EMAIL_ALREADY_IN_USE');
+    }
+
+    return user;
   }
 }

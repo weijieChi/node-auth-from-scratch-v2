@@ -1,81 +1,43 @@
 import { Prisma } from '../../../generated/prisma/client.js';
-import type { PrismaClient } from '../../../generated/prisma/client.js';
 
-import { EmailAlreadyInUseError } from '../../../application/errors/email-already-in-use-error.js';
 import type {
   CreateUserInput,
   UserRepository,
 } from '../../../application/ports/repositories/user.repository.js';
+
 import { User } from '../../../domain/entities/user.js';
 import { Email } from '../../../domain/value-objects/email.js';
 
-import { prisma } from './prisma-client.js';
+import { prisma, type PrismaClient } from './prisma-client.js';
 
 /**
- * UserRepository 的 Prisma/PostgreSQL 實作。
+ * Prisma implementation of UserRepository。
  *
- * Application Layer 只知道：
+ * Repository 負責：
  *
- *   UserRepository
+ * - PostgreSQL persistence
+ * - Prisma-specific error interpretation
+ * - Persistence Model → Domain Entity mapping
  *
- * Infrastructure Layer 才知道：
+ * Repository 不負責：
  *
- *   Prisma
- *   PostgreSQL
+ * - HTTP status code
+ * - HTTP response
+ * - Application business error
  *
- * Dependency direction：
+ * 已知且可預期的 persistence result
+ * 可以透過 Repository contract 回傳給 Application。
  *
- *   Application
- *       ↑
- *   Infrastructure
- *
- * 而不是 Application 去依賴 Prisma。
+ * 其他未預期的 Prisma / PostgreSQL error
+ * 保留原始 Error 與 stack trace，直接往上拋。
  */
 export class PrismaUserRepository implements UserRepository {
-  /**
-   * Prisma Client。
-   *
-   * 使用 interface type：
-   *
-   *   PrismaClient
-   *
-   * 讓 Repository 可以在建立時注入不同的 Prisma Client，
-   * 同時預設使用 Application 共用的 prisma instance。
-   *
-   * 不使用：
-   *
-   *   constructor(
-   *     private readonly client: PrismaClient = prisma,
-   *   ) {}
-   *
-   * 因為 constructor parameter property
-   * 不符合 erasableSyntaxOnly: true。
-   */
   private readonly client: PrismaClient;
 
-  /**
-   * Constructor Injection。
-   *
-   * 正式執行：
-   *
-   *   new PrismaUserRepository()
-   *
-   * 就會使用共用 prisma。
-   *
-   * 測試如果有需要，也可以：
-   *
-   *   new PrismaUserRepository(testPrismaClient)
-   */
   constructor(client: PrismaClient = prisma) {
     this.client = client;
   }
 
-  /**
-   * 依 Email 尋找 User。
-   *
-   * Email 在進入 Repository 前已經透過 Email Value Object
-   * 完成標準化，因此這裡直接使用 email.value 查詢即可。
-   */
   async findByEmail(email: Email): Promise<User | null> {
     const record = await this.client.user.findUnique({
       where: {
@@ -84,22 +46,17 @@ export class PrismaUserRepository implements UserRepository {
     });
 
     /**
-     * Repository 使用 null 表示沒有找到 User。
+     * null 在 findByEmail() 中代表：
      *
-     * 「不存在」不是 Infrastructure Error，
-     * 而是正常的查詢結果。
+     * Query 正常完成，
+     * 但不存在符合 Email 的 User。
+     *
+     * Database failure 不會被轉成 null。
      */
     if (!record) {
       return null;
     }
 
-    /**
-     * Prisma Persistence Model
-     *         ↓
-     * Domain Entity
-     *
-     * 不把 Prisma record 直接往 Application 傳。
-     */
     return new User({
       id: record.id,
       email: Email.create(record.email),
@@ -109,22 +66,7 @@ export class PrismaUserRepository implements UserRepository {
     });
   }
 
-  /**
-   * 建立 Local Password User。
-   *
-   * 目前資料模型使用：
-   *
-   *   users.passwordHash?
-   *
-   * Local Password Account：
-   *
-   *   passwordHash = bcrypt hash
-   *
-   * 未來 OAuth-only Account：
-   *
-   *   passwordHash = null
-   */
-  async create(input: CreateUserInput): Promise<User> {
+  async create(input: CreateUserInput): Promise<User | null> {
     try {
       const record = await this.client.user.create({
         data: {
@@ -133,14 +75,6 @@ export class PrismaUserRepository implements UserRepository {
         },
       });
 
-      /**
-       * Prisma record 轉回 Domain User。
-       *
-       * Domain User 本身目前不公開 passwordHash，
-       * 因為 password hash 是 Authentication /
-       * Persistence concern，不是一般 User Entity
-       * 需要到處攜帶的資料。
-       */
       return new User({
         id: record.id,
         email: Email.create(record.email),
@@ -150,44 +84,36 @@ export class PrismaUserRepository implements UserRepository {
       });
     } catch (error) {
       /**
-       * Email 在 PostgreSQL 有 UNIQUE constraint。
+       * RegisterUserUseCase 已經會先檢查 Email 是否存在，
+       * 但 concurrent requests 仍可能同時通過檢查。
        *
-       * 雖然 RegisterUserUseCase 已經先做：
+       * PostgreSQL UNIQUE constraint 是最後一道一致性保護。
        *
-       *   findByEmail()
+       * 目前 User model 的業務唯一欄位是 email，
+       * 因此 Prisma P2002 在這個 create() 流程中
+       * 以 null 回報 Application：
        *
-       * 但那不能防止 concurrent registration。
+       * 「User 沒有建立成功，因為發生 unique conflict。」
        *
-       * 例如：
-       *
-       * Request A → SELECT → 不存在
-       * Request B → SELECT → 不存在
-       *
-       * Request A → INSERT → success
-       * Request B → INSERT → UNIQUE violation
-       *
-       * 所以 Database UNIQUE constraint
-       * 才是最後一道一致性保護。
+       * 由 Application 決定這個結果的業務意義。
        */
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        /**
-         * 不讓 Prisma-specific error
-         * 洩漏到 Application Layer。
-         *
-         * Infrastructure：
-         *
-         *   Prisma P2002
-         *
-         * 轉換成 Application 可以理解的：
-         *
-         *   EmailAlreadyInUseError
-         */
-        throw new EmailAlreadyInUseError();
+        return null;
       }
 
       /**
-       * 不是我們目前能處理的 Prisma Error，
-       * 原樣往上拋，之後由更上層統一處理。
+       * 其他 Infrastructure error：
+       *
+       * - Database unavailable
+       * - Connection failure
+       * - Unexpected Prisma error
+       * - PostgreSQL error
+       *
+       * Repository 不猜測、不包裝成 AppError，
+       * 直接保留原始 Error 往上拋。
+       *
+       * 最後會由 Express Global Error Handler
+       * 記錄完整 stack trace 並回傳 HTTP 500。
        */
       throw error;
     }

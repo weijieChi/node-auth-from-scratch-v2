@@ -7,7 +7,29 @@ export interface CreateUserInput {
 }
 
 export interface UserRepository {
+  /**
+   * 找到 User：
+   * → User
+   *
+   * 查詢正常完成但不存在：
+   * → null
+   *
+   * Infrastructure error：
+   * → throw
+   */
   findByEmail(email: Email): Promise<User | null>;
 
-  create(input: CreateUserInput): Promise<User>;
+  /**
+   * 建立成功：
+   * → User
+   *
+   * 已知的資料唯一性衝突：
+   * → null
+   *
+   * 其他 Infrastructure error：
+   * → throw
+   *
+   * Repository 不負責決定 HTTP status 或 AppError。
+   */
+  create(input: CreateUserInput): Promise<User | null>;
 }

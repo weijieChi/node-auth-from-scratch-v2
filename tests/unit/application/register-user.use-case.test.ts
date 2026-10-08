@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { EmailAlreadyInUseError } from '../../../src/application/errors/email-already-in-use-error.js';
 import { RegisterUserUseCase } from '../../../src/application/use-cases/register-user.use-case.js';
 import { InvalidEmailError } from '../../../src/domain/errors/invalid-email-error.js';
 
@@ -102,12 +101,23 @@ describe('RegisterUserUseCase', () => {
      *
      * 因此應該被視為同一個帳號。
      */
+    // 'promise' is assigned a value but never used  @typescript-eslint/no-unused-vars
+    // const promise = useCase.execute({
+    //   email: 'USER@example.com',
+    //   password: 'password123',
+    // });
+
     await expect(
       useCase.execute({
-        email: 'USER@EXAMPLE.COM',
-        password: 'second-password-123',
+        email: 'USER@example.com',
+        password: 'password123',
       }),
-    ).rejects.toBeInstanceOf(EmailAlreadyInUseError);
+    ).rejects.toMatchObject({
+      name: 'AppError',
+      statusCode: 409,
+      code: 'EMAIL_ALREADY_IN_USE',
+      message: 'Email address is already in use',
+    });
 
     /**
      * Repository 裡仍然只能有第一個 User。
@@ -143,16 +153,48 @@ describe('RegisterUserUseCase', () => {
     await expect(
       useCase.execute({
         email: 'user@example.com',
-        password: 'short',
+        password: '1234567',
       }),
-    ).rejects.toBeInstanceOf(RangeError);
+    ).rejects.toMatchObject({
+      name: 'AppError',
+      statusCode: 400,
+      message: 'Password must contain at least 8 characters',
+    });
 
-    /**
-     * Password validation 失敗後，
-     * 不應該執行 Hash 或建立 User。
-     */
     expect(passwordHasher.hashedPasswords).toHaveLength(0);
 
+    expect(userRepository.users).toHaveLength(0);
+  });
+
+  it('rejects registration when the repository detects a create conflict', async () => {
+    /**
+     * findByEmail() 仍然會得到 null，
+     * 模擬另一個 concurrent request
+     * 在這之後搶先完成 INSERT。
+     */
+    userRepository.simulateCreateConflict = true;
+
+    await expect(
+      useCase.execute({
+        email: 'user@example.com',
+        password: 'password123',
+      }),
+    ).rejects.toMatchObject({
+      name: 'AppError',
+      statusCode: 409,
+      code: 'EMAIL_ALREADY_IN_USE',
+      message: 'Email address is already in use',
+    });
+
+    /**
+     * Conflict 發生在 create 階段，
+     * 所以 password 已經完成 hash。
+     */
+    expect(passwordHasher.hashedPasswords).toEqual(['password123']);
+
+    /**
+     * Repository 沒有真的建立 User。
+     */
     expect(userRepository.users).toHaveLength(0);
   });
 });

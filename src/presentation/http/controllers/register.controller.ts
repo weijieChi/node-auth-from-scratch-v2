@@ -72,8 +72,8 @@ export class RegisterController {
        *
        * 例如：
        *
-       * - email 不合法
-       * - password 太短
+       * - email 格式不合法
+       * - password 不是 string
        * - password 超過 bcrypt 72-byte limit
        */
       res.status(400).json({
@@ -92,12 +92,11 @@ export class RegisterController {
     }
 
     /**
-     * result.data 現在已經是：
+     * result.data 已經符合 HTTP Request Schema。
      *
-     * {
-     *   email: normalized valid email,
-     *   password: valid password
-     * }
+     * Application business rule
+     * 例如 password 最低長度，
+     * 仍由 RegisterUserUseCase 負責。
      */
     const user = await this.registerUserUseCase.execute(result.data);
 
