@@ -42,12 +42,21 @@ export default defineConfig({
     env: {
       NODE_ENV: 'test',
       DATABASE_URL: databaseUrl,
+      LOG_LEVEL: 'error',
 
       /**
-       * 測試時不要讓每個 HTTP Request
-       * 都一直印 Morgan http log。
+       * Step 10 Access Token Test Configuration。
+       *
+       * Test 使用固定值，
+       * 不需要使用 development secret。
        */
-      LOG_LEVEL: 'error',
+      ACCESS_TOKEN_SECRET: 'test-access-token-secret-at-least-32-characters-long',
+
+      ACCESS_TOKEN_ISSUER: 'node-auth-from-scratch-v2-test',
+
+      ACCESS_TOKEN_AUDIENCE: 'node-auth-from-scratch-v2-test-client',
+
+      ACCESS_TOKEN_TTL_SECONDS: '900',
     },
 
     coverage: {
@@ -70,7 +79,67 @@ export default defineConfig({
        */
       include: ['src/**/*.ts'],
 
-      exclude: ['src/generated/**'],
+      exclude: [
+        /**
+         * Prisma 自動產生的 Client。
+         *
+         * 不是我們自己維護的程式碼，
+         * 不需要納入 Coverage。
+         */
+        'src/generated/**',
+
+        /**
+         * TypeScript declaration files。
+         *
+         * 只有型別宣告，沒有 runtime behavior。
+         */
+        '**/*.d.ts',
+
+        /**
+         * Application Ports。
+         *
+         * 主要是 interface / type，
+         * 沒有可以實際執行的邏輯。
+         */
+        'src/application/ports/**',
+
+        /**
+         * Process Entry Point。
+         *
+         * main.ts 主要負責：
+         *
+         * - 啟動 HTTP Server
+         * - process signal
+         * - uncaughtException
+         * - unhandledRejection
+         *
+         * 不適合用一般 Unit / Integration Coverage
+         * 當作核心業務測試指標。
+         */
+        'src/main.ts',
+
+        /**
+         * Process shutdown lifecycle。
+         *
+         * 包含 SIGINT / SIGTERM、
+         * Server close、Database disconnect 等流程。
+         *
+         * 未來如果特別做 process lifecycle test，
+         * 再考慮移回 Coverage。
+         */
+        'src/bootstrap/shutdown.ts',
+
+        /**
+         * Logger bootstrap / transport configuration。
+         *
+         * 主要是 Winston transport、
+         * formatting、environment-specific setup。
+         *
+         * http-logger.ts 仍保留 Coverage，
+         * 因為它實際參與 HTTP request flow。
+         */
+        'src/observability/logger.ts',
+      ],
     },
   },
 });

@@ -381,4 +381,73 @@ describe('PrismaUserRepository', () => {
 
     expect(persistedUsers[0]?.passwordHash).toBe('first-test-password-hash');
   });
+
+  it('finds a user by id', async () => {
+    const email = Email.create(`find-by-id-${randomUUID()}@example.test`);
+
+    const createdUser = await repository.create({
+      email,
+      passwordHash: 'find-by-id-password-hash',
+    });
+
+    expect(createdUser).not.toBeNull();
+
+    if (!createdUser) {
+      throw new Error('Expected user creation to succeed');
+    }
+
+    createdUserIds.push(createdUser.id);
+
+    /**
+     * Access Token 的 sub 會保存 User ID。
+     *
+     * GET /auth/me 最後就是透過這個 ID
+     * 查詢目前 User。
+     */
+    const foundUser = await repository.findById(createdUser.id);
+
+    expect(foundUser).not.toBeNull();
+
+    expect(foundUser?.id).toBe(createdUser.id);
+
+    expect(foundUser?.email.value).toBe(email.value);
+  });
+
+  it('returns local authentication data by email', async () => {
+    const email = Email.create(`local-auth-${randomUUID()}@example.test`);
+
+    const passwordHash = 'stored-local-password-hash';
+
+    const createdUser = await repository.create({
+      email,
+      passwordHash,
+    });
+
+    expect(createdUser).not.toBeNull();
+
+    if (!createdUser) {
+      throw new Error('Expected user creation to succeed');
+    }
+
+    createdUserIds.push(createdUser.id);
+
+    /**
+     * Login 和一般 User Query 不同。
+     *
+     * Login 還需要 Persistence 中的：
+     *
+     * passwordHash
+     *
+     * 但 passwordHash 不放進 Domain User Entity。
+     */
+    const authUser = await repository.findLocalAuthByEmail(email);
+
+    expect(authUser).not.toBeNull();
+
+    expect(authUser?.user.id).toBe(createdUser.id);
+
+    expect(authUser?.user.email.value).toBe(email.value);
+
+    expect(authUser?.passwordHash).toBe(passwordHash);
+  });
 });

@@ -2,6 +2,7 @@ import { Prisma } from '../../../generated/prisma/client.js';
 
 import type {
   CreateUserInput,
+  LocalAuthUser,
   UserRepository,
 } from '../../../application/ports/repositories/user.repository.js';
 
@@ -117,5 +118,52 @@ export class PrismaUserRepository implements UserRepository {
        */
       throw error;
     }
+  }
+
+  async findById(id: string): Promise<User | null> {
+    const record = await this.client.user.findUnique({
+      where: {
+        id,
+      },
+    });
+
+    if (!record) {
+      return null;
+    }
+
+    return new User({
+      id: record.id,
+      email: Email.create(record.email),
+      status: record.status,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    });
+  }
+
+  async findLocalAuthByEmail(email: Email): Promise<LocalAuthUser | null> {
+    const record = await this.client.user.findUnique({
+      where: {
+        email: email.value,
+      },
+    });
+
+    if (!record) {
+      return null;
+    }
+
+    return {
+      user: new User({
+        id: record.id,
+        email: Email.create(record.email),
+        status: record.status,
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt,
+      }),
+
+      /**
+       * OAuth-only account 未來可以是 null。
+       */
+      passwordHash: record.passwordHash,
+    };
   }
 }

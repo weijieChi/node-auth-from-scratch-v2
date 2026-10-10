@@ -215,6 +215,17 @@ const envSchema = z.object({
    * 沒設定時預設為 info。
    */
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'http', 'verbose', 'debug', 'silly']).default('info'),
+
+  // JWT
+  ACCESS_TOKEN_SECRET: z
+    .string()
+    .min(32, 'ACCESS_TOKEN_SECRET must contain at least 32 characters'),
+
+  ACCESS_TOKEN_ISSUER: z.string().min(1).default('node-auth-from-scratch-v2'),
+
+  ACCESS_TOKEN_AUDIENCE: z.string().min(1).default('node-auth-from-scratch-v2-client'),
+
+  ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
 });
 
 /**

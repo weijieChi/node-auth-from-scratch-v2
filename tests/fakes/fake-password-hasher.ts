@@ -3,51 +3,83 @@ import type { PasswordHasher } from '../../src/application/ports/services/passwo
 /**
  * PasswordHasher 的測試用 Fake Implementation。
  *
- * RegisterUserUseCase 的 Unit Test 不需要真的執行 bcrypt。
+ * Unit Test 不需要真的執行 bcrypt。
  *
- * 這裡要測的是：
+ * Register：
  *
  * raw password
  *      ↓
- * RegisterUserUseCase
+ * hash()
  *      ↓
- * PasswordHasher.hash()
- *      ↓
- * hashed password
+ * hashed:<password>
  *
- * 至於 bcryptjs 本身是否真的能 hash / verify，
- * 應該由 BcryptPasswordHasher 自己的測試負責。
+ * Login：
+ *
+ * raw password
+ * +
+ * stored hash
+ *      ↓
+ * verify()
+ *      ↓
+ * boolean
+ *
+ * bcryptjs 本身是否正確 hash / verify，
+ * 由 BcryptPasswordHasher 自己的 Unit Test 負責。
  */
 export class FakePasswordHasher implements PasswordHasher {
   /**
-   * 記錄曾經要求 hash 的原始密碼。
+   * 記錄所有要求 hash 的 password。
    *
-   * 讓測試可以確認：
+   * Register Test 可以確認：
    *
-   * - PasswordHasher 是否真的被呼叫
+   * - hash() 是否真的被呼叫
    * - 傳入的 password 是否正確
    */
   readonly hashedPasswords: string[] = [];
 
   /**
-   * 回傳固定格式的假 Hash。
+   * 記錄 Login 曾經要求驗證過的 password / hash。
    *
-   * 因為 PasswordHasher interface 要求：
+   * 可以確認 LoginUserUseCase：
    *
-   *   Promise<string>
+   * - 有沒有真的驗證密碼
+   * - 使用的是不是 Repository 回傳的 hash
+   */
+  readonly verifiedPasswords: {
+    password: string;
+    passwordHash: string;
+  }[] = [];
+
+  /**
+   * Fake hash 格式固定為：
    *
-   * 但 Fake 本身沒有真正的 asynchronous operation，
-   * 所以不使用 async，而直接回傳 Promise.resolve()。
-   *
-   * 這樣可以避免：
-   *
-   *   @typescript-eslint/require-await
-   *
-   * 同時仍然符合 PasswordHasher contract。
+   * hashed:<raw-password>
    */
   hash(password: string): Promise<string> {
     this.hashedPasswords.push(password);
 
     return Promise.resolve(`hashed:${password}`);
+  }
+
+  /**
+   * Fake password verification。
+   *
+   * 例如：
+   *
+   * password:
+   *   correct-password
+   *
+   * passwordHash:
+   *   hashed:correct-password
+   *
+   * → true
+   */
+  verify(password: string, passwordHash: string): Promise<boolean> {
+    this.verifiedPasswords.push({
+      password,
+      passwordHash,
+    });
+
+    return Promise.resolve(passwordHash === `hashed:${password}`);
   }
 }

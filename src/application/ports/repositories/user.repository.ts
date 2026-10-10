@@ -6,30 +6,48 @@ export interface CreateUserInput {
   passwordHash: string;
 }
 
+/**
+ * Local Login 所需要的資料。
+ *
+ * passwordHash 可能是 null：
+ *
+ * Google OAuth-only User
+ * → 沒有 Local Password
+ */
+export interface LocalAuthUser {
+  user: User;
+  passwordHash: string | null;
+}
+
 export interface UserRepository {
-  /**
-   * 找到 User：
-   * → User
-   *
-   * 查詢正常完成但不存在：
-   * → null
-   *
-   * Infrastructure error：
-   * → throw
-   */
   findByEmail(email: Email): Promise<User | null>;
 
   /**
-   * 建立成功：
-   * → User
+   * Access Token 的 sub 是 userId，
+   * /auth/me 會使用這個 method 查 User。
+   */
+  findById(id: string): Promise<User | null>;
+
+  /**
+   * Local Login 專用 Query。
    *
-   * 已知的資料唯一性衝突：
-   * → null
+   * Domain User 本身不保存 passwordHash，
+   * 所以 Login 所需 credential data
+   * 由 Repository 另外提供。
+   */
+  findLocalAuthByEmail(email: Email): Promise<LocalAuthUser | null>;
+
+  /**
+   * B 方案：
    *
-   * 其他 Infrastructure error：
+   * User
+   * → 建立成功
+   *
+   * null
+   * → unique conflict
+   *
+   * 其他 Infrastructure Error
    * → throw
-   *
-   * Repository 不負責決定 HTTP status 或 AppError。
    */
   create(input: CreateUserInput): Promise<User | null>;
 }
